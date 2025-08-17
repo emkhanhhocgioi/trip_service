@@ -24,7 +24,7 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 
 app.use(cors({
-  origin: ['http://localhost:3001','http://localhost:3000','https://bus-ticket-fe.vercel.app'],
+  origin: ['https://api-gateway-cgv4.onrender.com','http://localhost:3000','https://bus-ticket-fe.vercel.app'],
   credentials: true
 }));
 
