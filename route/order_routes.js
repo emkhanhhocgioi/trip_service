@@ -16,7 +16,8 @@ const {
   checkQRPaymentStatus,
   verifyQRPayment,
   setPrepaidStatus,
-  getOrderbyID
+  getOrderbyID,
+  testTicketEmail
 } = require('../controller/order_controller');
 
 router.post('/order/create', createOrder);
@@ -37,6 +38,9 @@ router.get('/payment/vnpay-return', handlePaymentReturn);
 router.post('/payment/qr/create', createQRPayment);
 router.get('/payment/qr/status/:orderId', checkQRPaymentStatus);
 router.get('/payment/qr/verify', verifyQRPayment);
+
+// Test routes (for development)
+router.post('/test/email', testTicketEmail);
 
 
 

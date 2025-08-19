@@ -8,6 +8,137 @@ const vnpayService = require('../utils/vnpay');
 const { getClientIPAddress } = require('../utils/ip-utils');
 const mongoose = require('mongoose');
 
+const nodemailer = require("nodemailer");
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "hidrabula@gmail.com",
+    pass: "dgkg ruas hkqd nxmn",
+  },
+});
+
+// Function to send ticket email
+const sendTicketEmail = async (order, ticketInfo) => {
+  try {
+    const mailOptions = {
+      from: "hidrabula@gmail.com",
+      to: order.email,
+      subject: "🎫 Your Bus Ticket - Order Confirmed",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+            .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            .header { background: linear-gradient(135deg, #2563EB, #1D4ED8); color: white; padding: 30px 20px; text-align: center; }
+            .content { padding: 30px 20px; }
+            .ticket-info { background-color: #f8fafc; border-left: 4px solid #2563EB; padding: 20px; margin: 20px 0; border-radius: 5px; }
+            .info-row { display: flex; justify-content: space-between; margin: 10px 0; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+            .label { font-weight: bold; color: #374151; }
+            .value { color: #6b7280; word-break: break-all; }
+            .download-btn { display: inline-block; background-color: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px 5px; font-weight: bold; }
+            .download-btn:hover { background-color: #1D4ED8; }
+            .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🚌 Bus Ticket Confirmed</h1>
+              <p>Your order has been accepted and your ticket is ready!</p>
+            </div>
+            
+            <div class="content">
+              <h2>Hello ${order.fullName},</h2>
+              <p>Great news! Your bus ticket order has been confirmed. Here are your ticket details:</p>
+              
+              <div class="ticket-info">
+                <h3>🎫 Ticket Information</h3>
+                <div class="info-row">
+                  <span class="label">Ticket ID:</span>
+                  <span class="value">${ticketInfo.ticketId}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">NFT Token ID:</span>
+                  <span class="value">${ticketInfo.nftTicketId || 'N/A'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">Contract Address:</span>
+                  <span class="value">${ticketInfo.contractAddress || 'N/A'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">Transaction Hash:</span>
+                  <span class="value">${ticketInfo.blockchainTxHash || 'N/A'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">PDF Hash (IPFS):</span>
+                  <span class="value">${ticketInfo.ipfsHash || 'N/A'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">Metadata Hash (IPFS):</span>
+                  <span class="value">${ticketInfo.metadataHash || 'N/A'}</span>
+                </div>
+              </div>
+
+              <h3>📱 Download Your Ticket</h3>
+              <p>Click the buttons below to access your ticket:</p>
+              <div style="text-align: center; margin: 20px 0;">
+                <a href="${ticketInfo.downloadUrl}" class="download-btn">📄 Download PDF Ticket</a>
+                <a href="${ticketInfo.metadataUrl}" class="download-btn">📋 View Metadata</a>
+              </div>
+
+              <div class="ticket-info">
+                <h3>🚌 Journey Details</h3>
+                <div class="info-row">
+                  <span class="label">Passenger:</span>
+                  <span class="value">${order.fullName}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">Phone:</span>
+                  <span class="value">${order.phone}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">Email:</span>
+                  <span class="value">${order.email}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">Order Total:</span>
+                  <span class="value">${order.total.toLocaleString('vi-VN')} VND</span>
+                </div>
+              </div>
+
+              <h3>⚠️ Important Notes:</h3>
+              <ul>
+                <li>Please arrive at the departure point 15 minutes early</li>
+                <li>Keep this ticket for the entire journey</li>
+                <li>This ticket is stored on the blockchain as an NFT for authenticity</li>
+                <li>Contact support if you have any issues: 1900-xxxx</li>
+              </ul>
+            </div>
+            
+            <div class="footer">
+              <p>Thank you for choosing our bus service!</p>
+              <p>Safe travels and have a wonderful journey.</p>
+              <p><small>This is an automated email. Please do not reply.</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Ticket email sent successfully:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending ticket email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+
 // Create payment URL for VNPay
 const createPayment = async (req, res) => {
   try {
@@ -400,12 +531,21 @@ const acceptOrder = async (req, res) => {
     // Create PDF ticket after accepting order
     try {
       const ticketResult = await createPDfticket(
-        updatedOrder.routeId,
-        updatedOrder.fullName,
-        updatedOrder.phone
+        updatedOrder._id  // Pass orderId instead of individual parameters
       );
       
       console.log('Ticket creation result:', ticketResult);
+      
+      // Send email with ticket information if ticket was created successfully
+      if (ticketResult.status === 200 && ticketResult.ticketInfo) {
+        try {
+          const emailResult = await sendTicketEmail(updatedOrder, ticketResult.ticketInfo);
+          console.log('Email sending result:', emailResult);
+        } catch (emailError) {
+          console.error('Error sending ticket email:', emailError);
+          // Don't fail the whole process if email fails
+        }
+      }
       
       // Return success response with ticket info including blockchain data
       res.status(200).json({
@@ -416,6 +556,7 @@ const acceptOrder = async (req, res) => {
           orderStatus: updatedOrder.orderStatus,
           fullName: updatedOrder.fullName,
           total: updatedOrder.total,
+          email: updatedOrder.email,
           ticket: ticketResult.status === 200 ? {
             ...ticketResult.ticketInfo,
             contractAddress: ticketResult.ticketInfo.contractAddress,
@@ -1248,7 +1389,18 @@ const verifyQRPayment = async (req, res) => {
 
       // Create PDF ticket after successful payment
       try {
-        await createPDfticket(updatedOrder._id);
+        const ticketResult = await createPDfticket(updatedOrder._id);
+        
+        // Send email with ticket information if ticket was created successfully
+        if (ticketResult && ticketResult.status === 200 && ticketResult.ticketInfo) {
+          try {
+            const emailResult = await sendTicketEmail(updatedOrder, ticketResult.ticketInfo);
+            console.log('Email sending result after QR payment:', emailResult);
+          } catch (emailError) {
+            console.error('Error sending ticket email after QR payment:', emailError);
+            // Don't fail the whole process if email fails
+          }
+        }
       } catch (ticketError) {
         console.error('Error creating PDF ticket after QR payment:', ticketError);
       }
@@ -1384,6 +1536,43 @@ const setPrepaidStatus = async (req, res) => {
 };
 
 
+// Test email function (for development purposes)
+const testTicketEmail = async (req, res) => {
+  try {
+    const mockOrder = {
+      fullName: "Test User",
+      email: "test@example.com",
+      phone: "0123456789",
+      total: 250000
+    };
+    
+    const mockTicketInfo = {
+      ticketId: "TEST123456",
+      nftTicketId: "789",
+      contractAddress: "0x1234567890abcdef",
+      blockchainTxHash: "0xabcdef1234567890",
+      ipfsHash: "QmTestPDFHash123",
+      metadataHash: "QmTestMetadataHash456",
+      downloadUrl: "https://ipfs.io/ipfs/QmTestPDFHash123",
+      metadataUrl: "https://ipfs.io/ipfs/QmTestMetadataHash456"
+    };
+    
+    const result = await sendTicketEmail(mockOrder, mockTicketInfo);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Test email sent',
+      result: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Test email failed',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   acceptOrder,
@@ -1399,5 +1588,6 @@ module.exports = {
   checkQRPaymentStatus,
   verifyQRPayment,
   checkoutRouteOrder,
-  setPrepaidStatus
+  setPrepaidStatus,
+  testTicketEmail
 };

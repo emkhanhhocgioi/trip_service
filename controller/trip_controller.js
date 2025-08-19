@@ -1,5 +1,6 @@
 const Trip =  require('../model/trip_model');
 const Ticket = require('../model/ticket_models');
+const Order = require('../model/order_model');
 const { 
     mintTicket, 
     getAllTicketsFromContract, 
@@ -13,12 +14,15 @@ const cloudinary = require('cloudinary').v2;
 const pdfkit = require('pdfkit');
 const axios = require('axios');
 const FormData = require('form-data');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const PINATA_API_KEY = process.env.PINATA_API_KEY;    
 const PINATA_SECRET_API_KEY = process.env.PINATA_SECRET_API_KEY;
 console.log('PINATA_API_KEY:', PINATA_API_KEY);
 console.log('PINATA_SECRET_API_KEY length:', PINATA_SECRET_API_KEY ? PINATA_SECRET_API_KEY.length : 'undefined');
+
 
 
 // Pinata upload function
@@ -197,7 +201,8 @@ const searchTrips = async (req, res) => {
         // Active status filter (default to active trips only)
         query.isActive = isActive !== undefined ? isActive === 'true' : true;
         
-        const trips = await Trip.find(query);
+    const trips = await Trip.find(query).populate('partnerId', 'company');
+    console.log('Found trips:', trips);  
         res.status(200).json(trips);
     } catch (error) {
         console.error('Error searching trips:', error);
@@ -365,22 +370,56 @@ const checkSeatAvailability = async (req, res) => {
 
 
 
-const createPDfticket = async (tripId, passengerName, passengerPhone) => {   
+const createPDfticket = async (orderIdOrReq, res = null) => {   
     try {
-        console.log('Received data for ticket creation:', { tripId, passengerName, passengerPhone });
-        
-        if (!tripId || !passengerName || !passengerPhone) {
-            return { status: 400, message: "All fields are required" };
+        // Handle both direct call with orderId and Express request object
+        let orderId;
+        if (typeof orderIdOrReq === 'string' || typeof orderIdOrReq?.toString === 'function') {
+            // Direct call with orderId
+            orderId = orderIdOrReq.toString();
+        } else if (orderIdOrReq?.params?.orderId) {
+            // Express request object
+            orderId = orderIdOrReq.params.orderId;
+        } else {
+            const errorResponse = { status: 400, message: "Order ID is required" };
+            if (res) {
+                return res.status(400).json(errorResponse);
+            }
+            return errorResponse;
         }
 
+        console.log('Received orderId for ticket creation:', orderId);
         
-        const trip = await Trip.findById(tripId);
+        if (!orderId) {
+            return { status: 400, message: "Order ID is required" };
+        }
+
+        // Find the order and populate related data
+        const order = await Order.findById(orderId)
+            .populate('routeId')
+            .populate('userId');
+            
+        if (!order) {
+            const errorResponse = { status: 404, message: "Order not found" };
+            if (res) {
+                return res.status(404).json(errorResponse);
+            }
+            return errorResponse;
+        }
+
+        const trip = order.routeId;  // This is the populated trip/route data
         if (!trip) {
-            return { status: 404, message: "Trip not found" };
+            const errorResponse = { status: 404, message: "Trip not found for this order" };
+            if (res) {
+                return res.status(404).json(errorResponse);
+            }
+            return errorResponse;
         }
 
-        // Generate ticket ID
-        const ticketId = `TK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+        // Use orderId as ticketId as requested
+        const ticketId = orderId.toString();
+        const passengerName = order.fullName;
+        const passengerPhone = order.phone;
         const currentDate = new Date().toLocaleDateString('vi-VN');
         const currentTime = new Date().toLocaleTimeString('vi-VN');
 
@@ -409,10 +448,35 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
         const accentColor = '#F59E0B';
         const backgroundColor = '#F8FAFC';
 
-        // Register fonts that support English
-        // Using built-in fonts that support Unicode
-        const boldFont = 'Times-Bold';
-        const regularFont = 'Times-Roman';
+        // Register fonts that support Unicode (Vietnamese)
+        // Prefer NotoSans (place .ttf files at Trip_Service/assets/fonts)
+        const fontsDir = path.join(__dirname, '..', 'assets', 'fonts');
+        let regularFont = 'Times-Roman';
+        let boldFont = 'Times-Bold';
+        try {
+            const notoRegularPath = path.join(fontsDir, 'NotoSans-Regular.ttf');
+            const notoBoldPath = path.join(fontsDir, 'NotoSans-Bold.ttf');
+            if (fs.existsSync(notoRegularPath) && fs.existsSync(notoBoldPath)) {
+                doc.registerFont('NotoSans', notoRegularPath);
+                doc.registerFont('NotoSans-Bold', notoBoldPath);
+                regularFont = 'NotoSans';
+                boldFont = 'NotoSans-Bold';
+            } else {
+                // Try DejaVu as alternate (common on many systems)
+                const dejavuPath = path.join(fontsDir, 'DejaVuSans.ttf');
+                if (fs.existsSync(dejavuPath)) {
+                    doc.registerFont('DejaVu', dejavuPath);
+                    regularFont = 'DejaVu';
+                    boldFont = 'DejaVu';
+                } else {
+                    console.warn('Unicode fonts not found in', fontsDir, '- falling back to Times fonts. Copy NotoSans-Regular.ttf and NotoSans-Bold.ttf to the assets/fonts folder for proper Vietnamese rendering.');
+                }
+            }
+        } catch (fontErr) {
+            console.warn('Error registering custom fonts, falling back to built-in fonts:', fontErr.message);
+            regularFont = 'Times-Roman';
+            boldFont = 'Times-Bold';
+        }
 
         // Header Section
         doc.rect(0, 0, doc.page.width, 120).fill(primaryColor);
@@ -421,16 +485,16 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
         doc.fillColor('white')
            .fontSize(28)
            .font(boldFont)
-           .text('🚌 BUS BOOKING', 50, 30);
+           .text('BUS BOOKING', 50, 30);
         
         doc.fontSize(14)
            .font(regularFont)
            .text('Your Journey, Our Commitment', 50, 65);
 
         // Ticket ID and Date
-        doc.fontSize(12)
-           .text(`Ticket ID: ${ticketId}`, 400, 35)
-           .text(`Issued: ${currentDate} ${currentTime}`, 400, 55);
+       doc.fontSize(12)
+        .text(`Ticket ID: ${ticketId}`, 400, 55)
+        .text(`Issued: ${currentDate} ${currentTime}`, 400, 90);
 
         // Main Content Area
         let yPosition = 150;
@@ -556,7 +620,7 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
         doc.fontSize(12)
            .fillColor('#1F2937')
            .font(boldFont)
-           .text(tripId, 400, yPosition + 60);
+           .text(trip._id.toString(), 400, yPosition + 60);
 
         yPosition += 100;
 
@@ -609,7 +673,7 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
         const pdfHash = await uploadToPinata(pdfBuffer, fileName, {
             ticketId,
             passengerName,
-            tripId,
+            tripId: trip._id.toString(),
             type: 'bus_ticket'
         });
         
@@ -618,10 +682,11 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
         // Mint NFT ticket to blockchain first
         console.log('Minting NFT ticket to blockchain...');
         
-        const userWallet = "0x2411c0798DC164ceE6c8F9e804D1Cc28133F4d1c"; 
+        // Get user wallet from order (you might want to get this from user profile)
+        const userWallet = order.userId.walletAddress || "0x2411c0798DC164ceE6c8F9e804D1Cc28133F4d1c"; 
         
-        // Generate a seat number (simplified - you might want to implement proper seat selection)
-        const seatNumber = `${String.fromCharCode(65 + Math.floor(Math.random() * 10))}${Math.floor(Math.random() * 20) + 1}`;
+        // Get seat number from order or generate one if not provided
+        const seatNumber = order.seatNumber || `${String.fromCharCode(65 + Math.floor(Math.random() * 10))}${Math.floor(Math.random() * 20) + 1}`;
 
         // Create ticket metadata with seat number
         const ticketMetadata = {
@@ -630,6 +695,7 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
             image: `https://ipfs.io/ipfs/${pdfHash}`,
             attributes: [
                 { trait_type: "Ticket ID", value: ticketId },
+                { trait_type: "Order ID", value: orderId },
                 { trait_type: "From", value: trip.from },
                 { trait_type: "To", value: trip.to },
                 { trait_type: "Departure Time", value: trip.departureTime },
@@ -640,7 +706,7 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
             ],
             properties: {
                 ticketId,
-                tripId,
+                tripId: trip._id.toString(),
                 passengerName,
                 passengerPhone,
                 seatNumber,
@@ -663,15 +729,11 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
         try {
             const mintResult = await mintTicket({
                 to: userWallet,
-                tripId: tripId.toString(), // Convert ObjectId to string
+                tripId: order.routeId._id.toString(), // Use routeId from order
                 passengerName: passengerName,
                 passengerPhone: passengerPhone,
-                seatNumber: seatNumber,
-                pdfCid: pdfHash,
-                metadataCid: metadataHash,
-                pdfUrl: `https://ipfs.io/ipfs/${pdfHash}`,
-                metadataUrl: `https://ipfs.io/ipfs/${metadataHash}`,
-                expiredDate: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60)
+                pinataUrl: `https://gateway.pinata.cloud/ipfs/${metadataHash}`,
+                externalTicketId: parseInt(ticketId.replace('TICKET_', '')) || Date.now()
             });
 
             if (!mintResult.success) {
@@ -688,11 +750,11 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
             // Only save ticket to database after successful minting
             const newTicket = new Ticket({
                 ticketId,
-                tripId,
-                trip: tripId, // Also set the trip field for compatibility
+                tripId: order.routeId._id,
+                trip: order.routeId._id, // Also set the trip field for compatibility
                 passengerName,
                 passengerPhone,
-                seatNumber: seatNumber, // Add seat number to ticket record
+                seatNumber: order.seatNumber, // Get seat number from order
                 pdfCid: pdfHash,
                 metadataCid: metadataHash,
                 nftStorageUrl: `https://gateway.pinata.cloud/ipfs/${pdfHash}`,
@@ -706,7 +768,7 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
             await newTicket.save();
             
             // Return success response object with blockchain info
-            return {
+            const successResponse = {
                 status: 200,
                 message: "Ticket created, uploaded to Pinata, and minted as NFT successfully",
                 ticketInfo: {
@@ -723,22 +785,35 @@ const createPDfticket = async (tripId, passengerName, passengerPhone) => {
                 },
                 ticket: newTicket
             };
+            
+            if (res) {
+                return res.status(200).json(successResponse);
+            }
+            return successResponse;
         } catch (mintError) {
             console.error('Error minting NFT ticket:', mintError);
-            return {
+            const errorResponse = {
                 status: 404,
                 message: "Failed to mint NFT ticket. Ticket not created.",
                 error: mintError.message
             };
+            if (res) {
+                return res.status(404).json(errorResponse);
+            }
+            return errorResponse;
         }
 
     } catch (error) {
         console.error('Error generating PDF ticket or uploading to Pinata:', error);
-        return {
+        const errorResponse = {
             status: 500,
             message: "Failed to generate PDF ticket or upload to Pinata",
             error: error.message 
         };
+        if (res) {
+            return res.status(500).json(errorResponse);
+        }
+        return errorResponse;
     }
 }
 

@@ -22,8 +22,8 @@ const {createPDfticket,
     getContractTicketsByPhone
 } = require('../controller/trip_controller');
 
-// Ticket routes
-router.post('/ticket', createPDfticket);
+// Ticket routes  
+router.post('/ticket/:orderId', createPDfticket); // Changed to accept orderId parameter
 router.get('/ticket/:ticketId', getTicketFromPinata);
 router.post('/ticket/verify', verifyTicketPinata);
 router.get('/passenger/:passengerPhone/tickets', getPassengerTickets);
