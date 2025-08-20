@@ -946,6 +946,7 @@ const getPopularRoutes = async (req, res) => {
           isActive: '$routeDetails.isActive',
           images: '$routeDetails.images',
           partnerInfo: {
+            _id: '$partnerDetails._id',
             company: '$partnerDetails.company',
             phone: '$partnerDetails.phone',
             email: '$partnerDetails.email'
