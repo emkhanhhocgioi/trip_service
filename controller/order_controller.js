@@ -1,5 +1,6 @@
 const Order = require('../model/order_model');
 const Route = require('../model/trip_model').Route || require('../model/trip_model');
+const Partner = require('../model/user_partner');
 const {createPDfticket} = require('./trip_controller');
 const Trip =  require('../model/trip_model');
 const {mintTicket, getTicket, getBalance, getTicketOwner, cancelTicket, updateTicketStatus} = require('../service/contract_connect');
@@ -708,11 +709,16 @@ const getUserOrders = async (req, res) => {
       });
     }
 
-    // Find orders by userId and populate route information
-    const orders = await Order.find({ userId }).populate({
-      path: 'routeId',
-      select: 'busType duration departureTime from to '
-    });
+    // Find orders by userId and populate route and partner information
+    const orders = await Order.find({ userId })
+      .populate({
+        path: 'routeId',
+        select: 'busType duration departureTime from to price routeCode'
+      })
+      .populate({
+        path: 'bussinessId',
+        select: 'phone company email'
+      });
 
     if (orders.length === 0) {
       return res.status(200).json({
@@ -722,39 +728,37 @@ const getUserOrders = async (req, res) => {
       });
     }
 
-    const ordersWithContactAndRoute = await Promise.all(
-      orders.map(async order => {
-        let phone = '';
-        let company = '';
-        try {
-          const contactRes = await axios.get(`http://localhost:4001/api/users/partner/${order.bussinessId}/contact`);
-          console.log('Fetched partner contact:', contactRes.data);
-          phone = contactRes.data.phone || '';  
-          company = contactRes.data.company || '';
-          console.log('Order contact details:', phone, company);
-        } catch (err) {
-          console.log('Error fetching partner contact:', err.message);
-        }
-        
-        // Extract route information
-        const routeInfo = order.routeId ? {
-          busType: order.routeId.busType,
-          duration: order.routeId.duration,
-          departureTime: order.routeId.departureTime,
-          from: order.routeId.from,
-          to: order.routeId.to,
-          price: order.routeId.price,
-          routeCode: order.routeId.routeCode
-        } : {};
+    const ordersWithContactAndRoute = orders.map(order => {
+      // Extract partner contact information
+      const partnerInfo = order.bussinessId ? {
+        phone: order.bussinessId.phone || '',
+        company: order.bussinessId.company || '',
+        email: order.bussinessId.email || ''
+      } : {
+        phone: '',
+        company: '',
+        email: ''
+      };
+      
+      // Extract route information
+      const routeInfo = order.routeId ? {
+        busType: order.routeId.busType,
+        duration: order.routeId.duration,
+        departureTime: order.routeId.departureTime,
+        from: order.routeId.from,
+        to: order.routeId.to,
+        price: order.routeId.price,
+        routeCode: order.routeId.routeCode
+      } : {};
 
-        return {
-          ...order.toObject(),
-          phone,
-          company,
-          routeInfo
-        };
-      })
-    );
+      return {
+        ...order.toObject(),
+        phone: partnerInfo.phone,
+        company: partnerInfo.company,
+        partnerEmail: partnerInfo.email,
+        routeInfo
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -801,9 +805,14 @@ const getOrdersByPhoneNumber = async (req, res) => {
     
     const orders = await Order.find({ 
       phone: { $regex: phonePattern }
-    }).populate({
+    })
+    .populate({
       path: 'routeId',
       select: 'busType duration departureTime from to price routeCode'
+    })
+    .populate({
+      path: 'bussinessId',
+      select: 'phone company email'
     });
 
     if (orders.length === 0) {
@@ -815,39 +824,37 @@ const getOrdersByPhoneNumber = async (req, res) => {
     }
 
     // Get partner contact information for each order
-    const ordersWithContactAndRoute = await Promise.all(
-      orders.map(async order => {
-        let partnerPhone = '';
-        let company = '';
-        try {
-          const contactRes = await axios.get(`http://localhost:4001/api/users/partner/${order.bussinessId}/contact`);
-          console.log('Fetched partner contact:', contactRes.data);
-          partnerPhone = contactRes.data.phone || '';  
-          company = contactRes.data.company || '';
-          console.log('Partner contact details:', partnerPhone, company);
-        } catch (err) {
-          console.log('Error fetching partner contact:', err.message);
-        }
-        
-        // Extract route information
-        const routeInfo = order.routeId ? {
-          busType: order.routeId.busType,
-          duration: order.routeId.duration,
-          departureTime: order.routeId.departureTime,
-          from: order.routeId.from,
-          to: order.routeId.to,
-          price: order.routeId.price,
-          routeCode: order.routeId.routeCode
-        } : {};
+    const ordersWithContactAndRoute = orders.map(order => {
+      // Extract partner contact information
+      const partnerInfo = order.bussinessId ? {
+        phone: order.bussinessId.phone || '',
+        company: order.bussinessId.company || '',
+        email: order.bussinessId.email || ''
+      } : {
+        phone: '',
+        company: '',
+        email: ''
+      };
+      
+      // Extract route information
+      const routeInfo = order.routeId ? {
+        busType: order.routeId.busType,
+        duration: order.routeId.duration,
+        departureTime: order.routeId.departureTime,
+        from: order.routeId.from,
+        to: order.routeId.to,
+        price: order.routeId.price,
+        routeCode: order.routeId.routeCode
+      } : {};
 
-        return {
-          ...order.toObject(),
-          partnerPhone,
-          company,
-          routeInfo
-        };
-      })
-    );
+      return {
+        ...order.toObject(),
+        partnerPhone: partnerInfo.phone,
+        company: partnerInfo.company,
+        partnerEmail: partnerInfo.email,
+        routeInfo
+      };
+    });
 
     res.status(200).json({
       data: ordersWithContactAndRoute
@@ -866,7 +873,7 @@ const getOrdersByPhoneNumber = async (req, res) => {
 // Get popular routes based on order count
 const getPopularRoutes = async (req, res) => {
   try {
-    const { limit = 10 } = req.query; // Default limit to 10 routes
+    const { limit = 4 } = req.query; // Default limit to 4 routes
     const limitNumber = parseInt(limit);
 
     // Validate limit parameter
@@ -910,6 +917,17 @@ const getPopularRoutes = async (req, res) => {
         $unwind: '$routeDetails'
       },
       {
+        $lookup: {
+          from: 'partners', // Collection name for Partner model
+          localField: 'routeDetails.partnerId',
+          foreignField: '_id',
+          as: 'partnerDetails'
+        }
+      },
+      {
+        $unwind: '$partnerDetails'
+      },
+      {
         $project: {
           _id: 1,
           orderCount: 1,
@@ -925,7 +943,13 @@ const getPopularRoutes = async (req, res) => {
           licensePlate: '$routeDetails.licensePlate',
           rating: '$routeDetails.rating',
           partnerId: '$routeDetails.partnerId',
-          isActive: '$routeDetails.isActive'
+          isActive: '$routeDetails.isActive',
+          images: '$routeDetails.images',
+          partnerInfo: {
+            company: '$partnerDetails.company',
+            phone: '$partnerDetails.phone',
+            email: '$partnerDetails.email'
+          }
         }
       }
     ]);
@@ -938,38 +962,11 @@ const getPopularRoutes = async (req, res) => {
       });
     }
 
-    // Get partner information for each route
-    const routesWithPartnerInfo = await Promise.all(
-      popularRoutes.map(async route => {
-        let partnerInfo = {};
-        try {
-          const partnerRes = await axios.get(`http://localhost:4001/api/users/partner/${route.partnerId}/contact`);
-          partnerInfo = {
-            company: partnerRes.data.company || '',
-            phone: partnerRes.data.phone || '',
-            email: partnerRes.data.email || ''
-          };
-        } catch (err) {
-          console.log('Error fetching partner info for route:', route.routeCode, err.message);
-          partnerInfo = {
-            company: '',
-            phone: '',
-            email: ''
-          };
-        }
-
-        return {
-          ...route,
-          partnerInfo
-        };
-      })
-    );
-
     res.status(200).json({
       success: true,
       message: 'Popular routes retrieved successfully',
-      data: routesWithPartnerInfo,
-      total: routesWithPartnerInfo.length
+      data: popularRoutes,
+      total: popularRoutes.length
     });
 
   } catch (error) {

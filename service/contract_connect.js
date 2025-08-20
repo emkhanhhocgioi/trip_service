@@ -255,9 +255,7 @@ async function getTicket(ticketId) {
     }
 }
 
-/**
- * Get balance of tickets for an address
- */
+
 async function getBalance(address) {
     try {
         const contract = getContractReadOnly();
