@@ -9,6 +9,7 @@ const reviewrouter = require('./route/review_routes');
 const notificationRouter = require('./route/notification_routes');
 const messageRouter =require('./route/message_routes');
 const userRouter = require('./route/user/user_routes');
+const adminRouter = require('./route/admin_routes');
 const mongoose = require('./DTB/mongo');
 const http = require("http");
 const WebSocket = require("ws");
@@ -38,6 +39,7 @@ app.use('/api/reviews', reviewrouter);
 app.use('/api/notifications', notificationRouter);
 app.use('/api/messages', messageRouter);
 app.use('/api/users', userRouter);
+app.use('/api/admin', adminRouter);
 
 // Basic error handler
 app.use((err, req, res, next) => {

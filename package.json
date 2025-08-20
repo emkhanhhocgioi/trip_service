@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "create-admin": "node create_super_admin.js",
+    "test-admin": "node test_admin_apis.js"
   },
   "author": "",
   "license": "ISC",
